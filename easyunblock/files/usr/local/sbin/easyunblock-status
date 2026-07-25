@@ -7,6 +7,7 @@
 echo "=== easyunblock status ==="
 echo "state file: $(cat "$STATE_FILE" 2>/dev/null || echo 'missing')"
 echo "killswitch: $KILLSWITCH  (0=leak to WAN on fail, 1=blackhole)"
+echo "sni routing: $SNI_ROUTING (NFQUEUE $SNI_NFQUEUE_NUM / nfqws)"
 echo ""
 
 echo "--- ip rules (priorities $ANTI_LOOP_PRIO, $WG_RULE_PRIO) ---"
@@ -32,6 +33,8 @@ nft list chain inet fw4 splify_endpoint_mark_prerouting 2>/dev/null \
     | sed 's/^/  /' || echo "(endpoint chain missing)"
 nft list chain inet fw4 splify_ipsum_mark_prerouting 2>/dev/null \
     | sed 's/^/  /' || echo "(ipsum chain missing)"
+nft list chain inet fw4 splify_sni_mark_prerouting 2>/dev/null \
+    | sed 's/^/  /' || echo "(sni chain missing or disabled)"
 echo
 
 echo "=== endpoint firewall zones ==="

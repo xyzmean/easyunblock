@@ -300,3 +300,10 @@ setup_probe() {
     run grep -nE '^[[:space:]]*(on|off)\)' easyunblock/files/usr/local/sbin/easyunblock-ctl
     [ "$status" -eq 0 ]
 }
+
+@test "sni routing integration present in apply and common.sh" {
+    run grep -q "SNI_ROUTING" easyunblock/files/usr/local/lib/easyunblock/common.sh
+    [ "$status" -eq 0 ]
+    run grep -q "splify_sni_mark_prerouting" easyunblock/files/usr/local/sbin/easyunblock-apply
+    [ "$status" -eq 0 ]
+}

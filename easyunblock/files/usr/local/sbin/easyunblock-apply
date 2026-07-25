@@ -190,6 +190,23 @@ DEV_LINES="$(config_foreach emit_devices device)"
         esac
         echo "}"
     fi
+
+    if [ "$LAN_OK" = 1 ] && [ "$SNI_ROUTING" = "1" ] && zapret_available; then
+        echo "chain splify_sni_mark_prerouting {"
+        echo "    type filter hook prerouting priority mangle + 2; policy accept;"
+        echo "    # 1. Дропаем QUIC (HTTP/3 UDP 443) для LAN, чтобы браузер за 50мс переходил на TCP 443"
+        echo "    ip saddr { $LAN_CIDR } udp dport 443 counter drop"
+        echo ""
+        echo "    # 2. Если nfqws повесил connmark 0x1 -> отправляем в туннель"
+        echo "    ip saddr { $LAN_CIDR } ct mark $SNI_MARK_VPN meta mark set meta mark or $WG_MARK counter return"
+        echo ""
+        echo "    # 3. Если nfqws повесил connmark 0x2 -> прямой канал"
+        echo "    ip saddr { $LAN_CIDR } ct mark $SNI_MARK_DIRECT counter return"
+        echo ""
+        echo "    # 4. Первый пакет новой/неразмеченной TCP-сессии отправляем в NFQUEUE для SNI-анализа"
+        echo "    ip saddr { $LAN_CIDR } meta mark 0x0 tcp dport { 80, 443 } ct mark 0x0 ct state new,established counter queue num $SNI_NFQUEUE_NUM bypass"
+        echo "}"
+    fi
 } > "${POLICY_NFT_FILE}.tmp"
 _APPLY_FAIL=0
 mv "${POLICY_NFT_FILE}.tmp" "$POLICY_NFT_FILE" || { warn "failed to install $POLICY_NFT_FILE — policy ruleset NOT updated"; _APPLY_FAIL=1; }
@@ -220,4 +237,4 @@ fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1 \
 [ -x /usr/local/sbin/easyunblock-failover ] && /usr/local/sbin/easyunblock-failover >/dev/null 2>&1 || true
 
 _STATUS="applied"; [ "$_APPLY_FAIL" = 1 ] && _STATUS="applied WITH WARNINGS (see above)"
-log "$_STATUS: mode=$MODE ipsum=$IPSUM_ENABLED zapret=$ZAPRET_ENABLED kill=$KILLSWITCH vpn_cidrs=$(echo "$VPN_CIDRS" | wc -w) direct_cidrs=$(echo "$DIRECT_CIDRS" | wc -w)"
+log "$_STATUS: mode=$MODE ipsum=$IPSUM_ENABLED zapret=$ZAPRET_ENABLED sni=$SNI_ROUTING kill=$KILLSWITCH vpn_cidrs=$(echo "$VPN_CIDRS" | wc -w) direct_cidrs=$(echo "$DIRECT_CIDRS" | wc -w)"

@@ -413,6 +413,12 @@ config endpoint
 	option type 'wg'
 EOF
   fi
+  # Если в системе установлен zapret (или nfqws), включаем SNI-маршрутизацию
+  if [ -x /etc/init.d/zapret ] || [ -x /etc/init.d/zapret2 ] || command -v nfqws >/dev/null 2>&1 || [ -x /opt/zapret/nfq/nfqws ] || [ -x /opt/zapret2/nfq2/nfqws2 ]; then
+    say "Обнаружен zapret/nfqws в системе: включаем SNI-маршрутизацию в /etc/config/splify…"
+    uci -q set splify.global.sni_routing='1'
+    uci -q commit splify
+  fi
   # Apply the routing rules now so traffic flows through warp0 immediately.
   if command -v easyunblock-apply >/dev/null 2>&1; then
     easyunblock-apply >/dev/null 2>&1 || warn "easyunblock-apply завершился с ошибкой."

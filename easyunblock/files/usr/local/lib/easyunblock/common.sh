@@ -36,6 +36,7 @@ LAN_CIDR="$(
 config_get        HEALTH_TARGETS  global health_target   '1.1.1.1 8.8.8.8'
 config_get        HEALTH_CURL_URL global health_url       'https://1.1.1.1/cdn-cgi/trace'
 config_get_bool   ZAPRET_ENABLED  global zapret_enabled  1
+config_get_bool   SNI_ROUTING     global sni_routing     0
 config_get_bool   IPSUM_ENABLED   global ipsum_enabled   1
 config_get        IPSUM_URL       global ipsum_url       ''
 config_get_bool   RU_ENABLED      global ru_enabled      1
@@ -51,6 +52,8 @@ config_get        DIRECT_DOMAINS  global direct_domain   ''
 WG_TABLE="200"
 WG_MARK="0x40000";        WG_MARK_MASK="0x40000";   WG_RULE_PRIO="999"
 ANTI_LOOP_MARK="0x10000"; ANTI_LOOP_MASK="0x10000"; ANTI_LOOP_PRIO="1000"
+# SNI-based routing via NFQUEUE / nfqws
+SNI_MARK_VPN="0x1";       SNI_MARK_DIRECT="0x2";    SNI_NFQUEUE_NUM="200"
 # Isolated table+rule for health probes: the endpoints run route_allowed_ips=0
 # (so an ifup can't hijack main routes), which also means they have no main-table
 # route to public targets — the probe installs a scoped route via the candidate's

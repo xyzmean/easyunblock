@@ -17,6 +17,9 @@ config splify 'global'
 	# zapret DPI-bypass on WAN egress (auto-skipped if zapret is not installed)
 	option zapret_enabled '1'
 
+	# SNI-based domain routing via NFQUEUE / nfqws (auto-enabled if zapret is installed)
+	option sni_routing '0'
+
 	# ipsum: blocked/foreign IP list -> VPN (downloaded by URL, refreshed daily)
 	option ipsum_enabled '1'
 	option ipsum_url 'https://github.com/1andrevich/Re-filter-lists/releases/latest/download/ipsum.lst'

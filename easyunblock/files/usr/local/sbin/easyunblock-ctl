@@ -123,7 +123,7 @@ emit_wg_iface() {  # iface reveal
 # vars) keeps export faithful for round-tripping.
 emit_splify_global() {
     for _o in mode interval killswitch lan_iface lan_cidr health_url \
-              zapret_enabled ipsum_enabled ipsum_url ru_enabled ru_url \
+              zapret_enabled sni_routing ipsum_enabled ipsum_url ru_enabled ru_url \
               vpn_domains_url ignore_domains_url; do
         _v="$(g "splify.global.$_o")"
         [ -n "$_v" ] && json_add_string "$_o" "$_v"
@@ -270,7 +270,7 @@ import_wg_iface() {  # iface
 # Apply splify.global from the object currently selected in jshn.
 import_splify_global() {
     for _o in mode interval killswitch lan_iface lan_cidr health_url \
-              zapret_enabled ipsum_enabled ipsum_url ru_enabled ru_url \
+              zapret_enabled sni_routing ipsum_enabled ipsum_url ru_enabled ru_url \
               vpn_domains_url ignore_domains_url; do
         set_opt "splify.global.$_o" "$_o"
     done
