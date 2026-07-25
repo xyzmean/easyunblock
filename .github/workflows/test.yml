@@ -1,0 +1,36 @@
+name: Lint & test
+
+# Release-hygiene gate (design §4.4): static lint of the shell core + pure-logic
+# unit tests, on every PR / push to a feature or main branch. Fast (no SDK build)
+# so it runs ahead of the heavier package build in build.yml.
+on:
+  pull_request:
+  push:
+    branches: [ main, 'feature/**' ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: shellcheck (busybox-ash shell core)
+        run: |
+          shellcheck -s sh \
+            easyunblock/files/usr/local/sbin/easyunblock-* \
+            easyunblock/files/usr/local/lib/easyunblock/*.sh \
+            easyunblock/files/etc/init.d/easyunblock \
+            easyunblock/files/etc/uci-defaults/*
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: doctor self-test (pure logic, off-box)
+        run: EASYUNBLOCK_SELFTEST=1 sh easyunblock/files/usr/local/sbin/easyunblock-doctor
+      - name: Install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y bats
+      - name: bats unit tests
+        run: bats tests/

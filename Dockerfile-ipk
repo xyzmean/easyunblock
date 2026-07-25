@@ -1,0 +1,43 @@
+# Build the easyunblock .ipk package in the OpenWrt SDK.
+#
+# The package is PKGARCH:=all (pure shell, nothing compiles), so
+# any SDK arch yields an identical .ipk — we use x86_64.
+#
+# The slow part is unavoidable ONCE: a targeted `make package/<p>/compile` still
+# builds the runtime DEPENDS, and +kmod-nft-core drags in a full kernel build
+# (~15 min). The trick is to do that in a CACHE-STABLE layer, BEFORE our source
+# is copied, so it is keyed only on the SDK + this Dockerfile — not on our
+# scripts or the release version. With buildx gha cache the kernel/deps are built
+# once ever; every release after restores that layer and only recompiles our
+# data-only package (seconds).
+ARG SDK=ghcr.io/openwrt/sdk:x86_64-23.05.5
+FROM ${SDK}
+
+WORKDIR /builder
+
+# External feeds + the heavy dependency build. Cache-stable: nothing here depends
+# on our repo source or the release version, so this layer (kernel + kmods +
+# nftables/curl/dnsmasq/ip-full) is built once and reused.
+RUN ./scripts/feeds update packages base \
+ && ./scripts/feeds install nftables curl dnsmasq-full ip-full kmod-nft-core \
+ && make defconfig \
+ && make -j"$(nproc)" V=s \
+        package/nftables/compile \
+        package/curl/compile \
+        package/dnsmasq/compile \
+        package/iproute2/compile
+
+# Our local feed — changes here (every fix) only invalidate the cheap layers
+# below; the dependency/kernel layer above stays cached.
+COPY --chown=buildbot:buildbot easyunblock feed/easyunblock
+
+RUN echo "src-link easyunblock /builder/feed" >> feeds.conf.default \
+ && ./scripts/feeds update easyunblock \
+ && ./scripts/feeds install -p easyunblock easyunblock
+
+# Stamp the release version and build our package. Deps are already in
+# build_dir/staging_dir from the cached layer, so make skips them.
+ARG VERSION=0.0.0
+RUN sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${VERSION}/" \
+        feed/easyunblock/Makefile \
+ && make V=s package/easyunblock/compile

@@ -1,0 +1,88 @@
+name: Release
+
+# Manual release. Actions tab -> "Release" -> Run workflow, enter a version like
+# 26.7.5 (CalVer: YY.M.D — same scheme auto-version.yml stamps on every push to
+# main). Builds the .apk packages via Dockerfile-apk (buildx layer cache keeps
+# it to a few minutes) and publishes a tagged GitHub release with them attached.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия релиза (например 26.7.5)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build APK packages in OpenWrt SDK
+        uses: docker/build-push-action@v6
+        with:
+          file: ./Dockerfile-apk
+          context: .
+          load: true
+          tags: easyunblock:rel-apk
+          build-args: |
+            VERSION=${{ inputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build IPK packages in OpenWrt SDK
+        uses: docker/build-push-action@v6
+        with:
+          file: ./Dockerfile-ipk
+          context: .
+          load: true
+          tags: easyunblock:rel-ipk
+          build-args: |
+            VERSION=${{ inputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract built packages
+        run: |
+          mkdir -p release out
+          id=$(docker create easyunblock:rel-apk)
+          docker cp "$id:/builder/bin/packages/." ./out/
+          docker rm "$id"
+          id2=$(docker create easyunblock:rel-ipk)
+          docker cp "$id2:/builder/bin/packages/." ./out/
+          docker rm "$id2"
+          find ./out \( -name 'easyunblock*.apk' -o -name 'easyunblock*.ipk' \) \
+               -exec cp -v {} release/ \;
+          cp -v install.sh release/
+          echo "--- shipped ---"; ls -l release
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: easyunblock v${{ inputs.version }}
+          prerelease: false
+          make_latest: true
+          files: |
+            release/*.apk
+            release/*.ipk
+            release/install.sh
+          body: |
+            Релиз easyunblock v${{ inputs.version }}.
+
+            Установка одной командой на роутере (OpenWrt 24.10+/25.12+ / apk):
+            ```
+            wget -O - https://raw.githubusercontent.com/xyzmean/easyunblock/main/install.sh | sh
+            ```
+
+            Или вручную из приложённых файлов (.apk для новых систем, .ipk для старых):
+            ```
+            apk add --allow-untrusted ./easyunblock-*.apk
+            # или для opkg: opkg install ./easyunblock-*.ipk
+            ```

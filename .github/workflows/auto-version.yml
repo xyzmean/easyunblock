@@ -1,0 +1,112 @@
+name: Auto Version
+
+on:
+  push:
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.calver.outputs.tag }}
+      new_version: ${{ steps.calver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # CalVer: YY.M.D (год.месяц.день, без ведущих нулей) — e.g. 26.7.5 для
+      # 5 июля 2026. Несколько релизов за один день получают суффикс .2, .3, ...
+      - name: Compute CalVer version
+        id: calver
+        run: |
+          # Используем TZ=Europe/Moscow для локального времени
+          base="$(TZ='Europe/Moscow' date +'%y.%-m.%-d')"
+          version="$base"
+          n=1
+          while git rev-parse -q --verify "refs/tags/v$version" >/dev/null 2>&1; do
+              n=$((n + 1))
+              version="$base.$n"
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Update VERSION file and tag
+        run: |
+          echo "${{ steps.calver.outputs.version }}" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to ${{ steps.calver.outputs.version }} [skip ci]"
+          git tag "${{ steps.calver.outputs.tag }}"
+          git push
+          git push origin "${{ steps.calver.outputs.tag }}"
+
+      - name: Create a GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.calver.outputs.tag }}
+          name: Release ${{ steps.calver.outputs.tag }}
+          generateReleaseNotes: true
+
+  # Build the .apk and attach to the release here, in the same workflow — a tag
+  # pushed by GITHUB_TOKEN above would NOT trigger build.yml's tag event.
+  packages:
+    needs: version
+    if: needs.version.outputs.new_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      # check out main (after the VERSION bump) so the package version matches the tag
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build APK packages in OpenWrt SDK
+        uses: docker/build-push-action@v6
+        with:
+          file: ./Dockerfile-apk
+          context: .
+          load: true
+          tags: easyunblock:rel-apk
+          build-args: |
+            VERSION=${{ needs.version.outputs.new_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build IPK packages in OpenWrt SDK
+        uses: docker/build-push-action@v6
+        with:
+          file: ./Dockerfile-ipk
+          context: .
+          load: true
+          tags: easyunblock:rel-ipk
+          build-args: |
+            VERSION=${{ needs.version.outputs.new_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract built packages
+        run: |
+          mkdir -p artifacts out
+          id=$(docker create easyunblock:rel-apk)
+          docker cp "$id:/builder/bin/packages/." ./out/
+          docker rm "$id"
+          id2=$(docker create easyunblock:rel-ipk)
+          docker cp "$id2:/builder/bin/packages/." ./out/
+          docker rm "$id2"
+          find ./out \( -name 'easyunblock*.apk' -o -name 'easyunblock*.ipk' \) \
+               -exec cp -v {} artifacts/ \;
+          ls -l artifacts
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.new_tag }}
+          files: artifacts/*

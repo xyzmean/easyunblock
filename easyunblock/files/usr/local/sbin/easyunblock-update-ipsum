@@ -1,0 +1,47 @@
+#!/bin/sh
+# easyunblock-update-ipsum — daily refresh of ipsum.lst → nft set.
+#
+# Downloaded from uci splify.global.ipsum_url, validated as CIDR v4, and
+# atomicaly re-populated into inet fw4 splify_ipsum_v4 without flushing
+# it (the set definition is in /etc/nftables.d/30-splify.nft).
+
+set -e   # fail-fast on curl/validation; no `-u`, /lib/functions.sh isn't nounset-safe
+. /usr/local/lib/easyunblock/common.sh
+
+[ "$IPSUM_ENABLED" = "1" ] || { log "ipsum disabled (IPSUM_ENABLED=0)"; exit 0; }
+[ -n "$IPSUM_URL" ] || die "no ipsum_url configured"
+single_run update-ipsum   # bail if a concurrent run (cron vs self-heal) holds the lock
+
+TMP="/tmp/easyunblock-update-ipsum.$$"
+mkdir -p "$TMP" "$(dirname "$IPSUM_FILE")" "$(dirname "$IPSUM_NFT_FILE")"
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+curl -fsSL --connect-timeout 10 --max-time 180 --retry 2 \
+    -o "$TMP/raw.lst" "$IPSUM_URL" || die "curl failed: $IPSUM_URL"
+
+clean_ip_list < "$TMP/raw.lst" > "$TMP/clean.lst"
+
+count=$(wc -l < "$TMP/clean.lst")
+[ "$count" -ge "$IPSUM_MIN_COUNT" ] || die "only $count valid prefixes (need $IPSUM_MIN_COUNT)"
+
+# Command stream: flush + one comma-block add (no table wrap, no set definition).
+emit_nft_set_block "$IPSUM_TABLE" "$IPSUM_SET" < "$TMP/clean.lst" > "$TMP/live.nft"
+
+# Atomic live reload. On failure keep the payload OUTSIDE $TMP — the EXIT trap
+# wipes $TMP, so a path inside it would be gone before anyone can inspect it.
+nft -f "$TMP/live.nft" || {
+    cp "$TMP/live.nft" /tmp/easyunblock-ipsum-failed.nft 2>/dev/null || true
+    die "atomic nft live update failed (kept: /tmp/easyunblock-ipsum-failed.nft)"
+}
+
+# Persist. IPSUM_NFT_FILE is itself the replay source (failover reloads it after a
+# fw4 flush); the list is re-downloaded daily and gated by IPSUM_MIN_COUNT above,
+# so no separate timestamped backups are kept.
+cat "$TMP/live.nft" > "$IPSUM_NFT_FILE"
+cat "$TMP/clean.lst" > "$IPSUM_FILE"
+
+log "ipsum refresh OK: $count prefixes from $IPSUM_URL"
+
+# Cascade: rebuild zapret bypass since it depends on ipsum.lst.
+[ -x /usr/local/sbin/easyunblock-sync-nozapret ] \
+    && /usr/local/sbin/easyunblock-sync-nozapret >/dev/null 2>&1 || true
