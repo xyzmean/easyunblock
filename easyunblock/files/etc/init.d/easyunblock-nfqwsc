@@ -19,7 +19,7 @@ start_service() {
     fi
 
     procd_open_instance
-    procd_set_param command "$bin" --qnum=200 --mark-match=0x1 --mark-nomatch=0x2 --hostlist="$hostlist"
+    procd_set_param command "$bin" --qnum="${SNI_NFQUEUE_NUM:-220}" --mark-match="${SNI_MARK_VPN:-0x1}" --mark-nomatch="${SNI_MARK_DIRECT:-0x2}" --hostlist="$hostlist"
     procd_set_param respawn 3600 5 0
     procd_set_param stdout 1
     procd_set_param stderr 1

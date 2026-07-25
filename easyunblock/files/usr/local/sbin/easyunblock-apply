@@ -260,10 +260,6 @@ fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1 \
 # ---- синхронизация доменов с nfqwsc / zapret и управление службой --------
 if [ "$SNI_ROUTING" = "1" ]; then
     if nfqwsc_available; then
-        if [ -n "$ZAPRET_INIT" ] && [ -x "$ZAPRET_INIT" ]; then
-            "$ZAPRET_INIT" stop >/dev/null 2>&1 || true
-            "$ZAPRET_INIT" disable >/dev/null 2>&1 || true
-        fi
         HOSTLIST="/var/run/easyunblock-sni-domains.txt"
         {
             echo "dummy.easyunblock.local"
