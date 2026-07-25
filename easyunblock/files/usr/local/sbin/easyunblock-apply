@@ -191,26 +191,41 @@ DEV_LINES="$(config_foreach emit_devices device)"
         echo "}"
     fi
 
-    if [ "$LAN_OK" = 1 ] && [ "$SNI_ROUTING" = "1" ] && zapret_available; then
+    if [ "$LAN_OK" = 1 ] && [ "$SNI_ROUTING" = "1" ] && ( nfqwsc_available || zapret_available ); then
         echo "chain splify_sni_mark_prerouting {"
         echo "    type filter hook prerouting priority mangle + 2; policy accept;"
-        echo "    # 1. Дропаем QUIC (HTTP/3 UDP 443) для LAN, чтобы браузер за 50мс переходил на TCP 443"
-        echo "    ip saddr { $LAN_CIDR } udp dport 443 counter drop"
-        echo ""
-        echo "    # 2. Если nfqws повесил connmark 0x1 -> отправляем в туннель"
+        if nfqwsc_available; then
+            echo "    # 1. nfqwsc распознает QUIC в userspace без блокировки протокола"
+        else
+            echo "    # 1. Дропаем QUIC (HTTP/3 UDP 443) для LAN, чтобы браузер переходил на TCP 443 для SNI-анализа"
+            echo "    ip saddr { $LAN_CIDR } udp dport 443 counter drop"
+            echo ""
+        fi
+        echo "    # 2. RESTORE & FAST-PATH: Если на сессии установлен connmark 0x1 -> отправляем в туннель"
         echo "    ip saddr { $LAN_CIDR } ct mark $SNI_MARK_VPN meta mark set meta mark or $WG_MARK counter return"
         echo ""
-        echo "    # 3. Если nfqws повесил connmark 0x2 -> прямой канал"
+        echo "    # 3. FAST-PATH: Если на сессии установлен connmark 0x2 -> прямой канал"
         echo "    ip saddr { $LAN_CIDR } ct mark $SNI_MARK_DIRECT counter return"
         echo ""
-        echo "    # 4. Первый пакет с данными (ClientHello / HTTP Host) неразмеченной TCP-сессии отправляем в NFQUEUE для SNI-анализа"
+        echo "    # 4a. Первый пакет с данными TCP (ClientHello / HTTP Host) отправляем в NFQUEUE для SNI-анализа"
         echo "    ip saddr { $LAN_CIDR } meta mark 0x0 tcp dport { 80, 443 } ct mark 0x0 tcp flags ! fin,syn,rst meta length > 100 counter queue num $SNI_NFQUEUE_NUM bypass"
+        if nfqwsc_available; then
+            echo "    # 4b. Первый пакет с данными UDP (QUIC Initial) отправляем в NFQUEUE для инспекции в nfqwsc"
+            echo "    ip saddr { $LAN_CIDR } meta mark 0x0 udp dport 443 ct mark 0x0 meta length > 100 counter queue num $SNI_NFQUEUE_NUM bypass"
+        fi
         echo ""
-        echo "    # 5. После возврата из NFQUEUE: если штатный zapret (nfqws) распознал домен из блок-листа и сгенерировал десинк-пакет с флагом 0x40000000 -> отправляем в туннель"
+        echo "    # 5a. После возврата из NFQUEUE (nfqwsc): если выставил метку 0x1 (домен в блок-листе) -> вешаем connmark 0x1 и в туннель"
+        echo "    ip saddr { $LAN_CIDR } meta mark & $SNI_MARK_VPN == $SNI_MARK_VPN ct mark set $SNI_MARK_VPN meta mark set meta mark or $WG_MARK counter return"
+        echo "    # 5b. После возврата из NFQUEUE (zapret nfqws): если сгенерировал десинк-пакет с флагом 0x40000000 -> вешаем connmark 0x1 и в туннель"
         echo "    ip saddr { $LAN_CIDR } meta mark & 0x40000000 == 0x40000000 ct mark set $SNI_MARK_VPN meta mark set meta mark or $WG_MARK counter return"
         echo ""
-        echo "    # 6. Если пакет с данными вернулся без модификаций (NF_ACCEPT) -> сайт обычный, вешаем на сессию connmark 0x2, чтобы дальнейший трафик летел напрямую"
-        echo "    ip saddr { $LAN_CIDR } ct mark 0x0 tcp flags ! fin,syn,rst meta length > 100 ct mark set $SNI_MARK_DIRECT counter return"
+        echo "    # 6a. После возврата из NFQUEUE (nfqwsc): если выставил метку 0x2 (домен не в списке) -> вешаем connmark 0x2"
+        echo "    ip saddr { $LAN_CIDR } meta mark & $SNI_MARK_DIRECT == $SNI_MARK_DIRECT ct mark set $SNI_MARK_DIRECT counter return"
+        echo "    # 6b. Fallback: если пакет вернулся без модификаций (NF_ACCEPT) -> сайт обычный, вешаем connmark 0x2"
+        echo "    ip saddr { $LAN_CIDR } ct mark 0x0 meta l4proto tcp tcp flags ! fin,syn,rst meta length > 100 ct mark set $SNI_MARK_DIRECT counter return"
+        if nfqwsc_available; then
+            echo "    ip saddr { $LAN_CIDR } ct mark 0x0 meta l4proto udp udp dport 443 meta length > 100 ct mark set $SNI_MARK_DIRECT counter return"
+        fi
         echo "}"
     fi
 } > "${POLICY_NFT_FILE}.tmp"
@@ -242,21 +257,29 @@ fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1 \
 /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
 [ -x /usr/local/sbin/easyunblock-failover ] && /usr/local/sbin/easyunblock-failover >/dev/null 2>&1 || true
 
-# ---- синхронизация доменов с zapret / nfqws и управление службой --------
-if [ "$SNI_ROUTING" = "1" ] && zapret_available; then
-    ZAPRET_HOSTS=""
-    [ -f /opt/zapret2/ipset/zapret-hosts-user.txt ] && ZAPRET_HOSTS="/opt/zapret2/ipset/zapret-hosts-user.txt"
-    [ -f /opt/zapret/ipset/zapret-hosts-user.txt ]  && ZAPRET_HOSTS="/opt/zapret/ipset/zapret-hosts-user.txt"
-    if [ -n "$ZAPRET_HOSTS" ]; then
+# ---- синхронизация доменов с nfqwsc / zapret и управление службой --------
+if [ "$SNI_ROUTING" = "1" ]; then
+    if nfqwsc_available; then
+        HOSTLIST="/var/run/easyunblock-sni-domains.txt"
         {
             [ -r "$DOMAINS_VPN_FILE" ] && cat "$DOMAINS_VPN_FILE"
             for _d in $VPN_DOMAINS; do [ -n "$_d" ] && echo "$_d"; done
-        } | sort -u > "$ZAPRET_HOSTS.tmp" 2>/dev/null && mv "$ZAPRET_HOSTS.tmp" "$ZAPRET_HOSTS" 2>/dev/null || true
-    fi
-    # Убеждаемся, что служба zapret запущена и подхватила правила
-    if [ -n "$ZAPRET_INIT" ] && [ -x "$ZAPRET_INIT" ]; then
-        "$ZAPRET_INIT" enabled >/dev/null 2>&1 || "$ZAPRET_INIT" enable >/dev/null 2>&1 || true
-        zapret_running || "$ZAPRET_INIT" start >/dev/null 2>&1 || "$ZAPRET_INIT" restart >/dev/null 2>&1 || true
+        } | sort -u > "$HOSTLIST.tmp" 2>/dev/null && mv "$HOSTLIST.tmp" "$HOSTLIST" 2>/dev/null || true
+        [ -x /etc/init.d/easyunblock-nfqwsc ] && /etc/init.d/easyunblock-nfqwsc restart >/dev/null 2>&1 || true
+    elif zapret_available; then
+        ZAPRET_HOSTS=""
+        [ -f /opt/zapret2/ipset/zapret-hosts-user.txt ] && ZAPRET_HOSTS="/opt/zapret2/ipset/zapret-hosts-user.txt"
+        [ -f /opt/zapret/ipset/zapret-hosts-user.txt ]  && ZAPRET_HOSTS="/opt/zapret/ipset/zapret-hosts-user.txt"
+        if [ -n "$ZAPRET_HOSTS" ]; then
+            {
+                [ -r "$DOMAINS_VPN_FILE" ] && cat "$DOMAINS_VPN_FILE"
+                for _d in $VPN_DOMAINS; do [ -n "$_d" ] && echo "$_d"; done
+            } | sort -u > "$ZAPRET_HOSTS.tmp" 2>/dev/null && mv "$ZAPRET_HOSTS.tmp" "$ZAPRET_HOSTS" 2>/dev/null || true
+        fi
+        if [ -n "$ZAPRET_INIT" ] && [ -x "$ZAPRET_INIT" ]; then
+            "$ZAPRET_INIT" enabled >/dev/null 2>&1 || "$ZAPRET_INIT" enable >/dev/null 2>&1 || true
+            zapret_running || "$ZAPRET_INIT" start >/dev/null 2>&1 || "$ZAPRET_INIT" restart >/dev/null 2>&1 || true
+        fi
     fi
 fi
 

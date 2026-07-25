@@ -1,10 +1,17 @@
-#!/bin/sh
 # easyunblock-update-domains — download domain lists for VPN / ignore routing.
 #
-# Reads URLs from uci splify.global.vpn_domains_url / ignore_domains_url,
-# writes filtered domain names to DOMAINS_VPN_FILE (/etc/splify/vpn-domains.lst) and
-# DOMAINS_IGNORE_FILE (one bare domain per line), then runs easyunblock-apply so the
-# dnsmasq nftset tags update live.
+# Reads domains from THREE sources (merged, in priority order) and writes them
+# to DOMAINS_VPN_FILE / DOMAINS_IGNORE_FILE (one bare domain per line), then
+# runs easyunblock-apply so the dnsmasq nftset tags update live:
+#   1. uci splify.global.vpn_domain / direct_domain  (manual, persistent — the
+#      list `easyunblock-cli domain-add` / `domains-import` write into)
+#   2. uci splify.global.vpn_domains_url / ignore_domains_url  (remote/local URL)
+#   3. /etc/splify/{vpn,ignore}-domains.d/*.lst  (drop-dir for ad-hoc files)
+#
+# FIX (was): only #2 and #3 were merged — manual vpn_domain entries reached
+# zapret-hosts-user.txt (easyunblock-apply reads $VPN_DOMAINS directly) but NEVER
+# reached this .lst file, so the dnsmasq nftset IP-tag path was blind to them,
+# AND a cron/update would truncate the .lst to empty for a vpn_domain-only user.
 #
 # No `set -u`: OpenWrt's config_* helpers aren't nounset-safe.
 set -e
@@ -26,12 +33,20 @@ clean_domains() {
     '
 }
 
-fetch_all() {  # sources dest_file label
-    _sources="$1"; _dest="$2"; _label="$3"
+# fetch_all <url_sources> <dest_file> <label> <uci_list_values>
+# Merges uci list + URL/local paths + drop-dir .lst files, cleans, writes dest.
+fetch_all() {
+    _sources="$1"; _dest="$2"; _label="$3"; _uci="$4"
     _tmp_raw="$TMP/raw_${_label}"
     : > "$_tmp_raw"
-    
-    # 1. Загружаем из URL или локальных путей, указанных в uci
+
+    # 1. UCI manual list (vpn_domain / direct_domain) — highest priority,
+    #    persistent across cron refreshes. Written one per line.
+    for _d in $_uci; do
+        [ -n "$_d" ] && printf '%s\n' "$_d" >> "$_tmp_raw"
+    done
+
+    # 2. URL or local paths from uci vpn_domains_url / ignore_domains_url
     for _src in $_sources; do
         case "$_src" in
             http://*|https://*|ftp://*)
@@ -43,14 +58,14 @@ fetch_all() {  # sources dest_file label
         esac
     done
 
-    # 2. Склеиваем со всеми .lst файлами из директории /etc/splify/${_label}-domains.d/
+    # 3. Склеиваем со всеми .lst файлами из директории /etc/splify/${_label}-domains.d/
     if [ -d "/etc/splify/${_label}-domains.d" ]; then
         for _f in "/etc/splify/${_label}-domains.d/"*.lst; do
             [ -r "$_f" ] && cat "$_f" >> "$_tmp_raw" 2>/dev/null || true
         done
     fi
 
-    # 3. Очищаем, удаляем *. и дубликаты
+    # 4. Очищаем, удаляем *. и дубликаты
     clean_domains < "$_tmp_raw" > "$TMP/clean_${_label}"
     _n=$(wc -l < "$TMP/clean_${_label}" 2>/dev/null || echo 0)
     if [ "$_n" -gt 0 ]; then
@@ -64,8 +79,8 @@ fetch_all() {  # sources dest_file label
 mkdir -p /etc/splify/vpn-domains.d /etc/splify/ignore-domains.d 2>/dev/null || true
 
 _changed=0
-fetch_all "$VPN_DOMAINS_URL"    "$DOMAINS_VPN_FILE"    vpn    && _changed=1
-fetch_all "$IGNORE_DOMAINS_URL" "$DOMAINS_IGNORE_FILE" ignore && _changed=1
+fetch_all "$VPN_DOMAINS_URL"    "$DOMAINS_VPN_FILE"    vpn    "$VPN_DOMAINS"    && _changed=1
+fetch_all "$IGNORE_DOMAINS_URL" "$DOMAINS_IGNORE_FILE" ignore "$DIRECT_DOMAINS" && _changed=1
 
 [ "$_changed" = 1 ] && [ -x /usr/local/sbin/easyunblock-apply ] \
     && /usr/local/sbin/easyunblock-apply >/dev/null 2>&1 || true

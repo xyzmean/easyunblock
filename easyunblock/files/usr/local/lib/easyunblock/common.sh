@@ -595,7 +595,7 @@ health_ping() {
     ip -4 route flush table "$PROBE_TABLE" 2>/dev/null || true
     return "$_hpok"
 }
-zapret_running()   { (ps w 2>/dev/null || ps 2>/dev/null) | grep -q '[n]fqws'; }
+zapret_running()   { (ps w 2>/dev/null || ps 2>/dev/null) | grep -E '[n]fqws([ \t]|$)' | grep -v 'nfqwsc' >/dev/null 2>&1; }
 zapret_available() {
     # init script (zapret1 OR zapret2)
     [ -x /etc/init.d/zapret2 ] && return 0
@@ -607,5 +607,15 @@ zapret_available() {
     command -v nfqws2 >/dev/null 2>&1 && return 0
     command -v nfqws  >/dev/null 2>&1 && return 0
     zapret_running && return 0
+    return 1
+}
+nfqwsc_running()   { (ps w 2>/dev/null || ps 2>/dev/null) | grep -q '[n]fqwsc'; }
+nfqwsc_available() {
+    [ -x /etc/init.d/easyunblock-nfqwsc ] && return 0
+    [ -x /usr/local/sbin/nfqwsc ] && return 0
+    [ -x /usr/bin/nfqwsc ] && return 0
+    [ -x /opt/zapret/nfq/nfqwsc ] && return 0
+    command -v nfqwsc >/dev/null 2>&1 && return 0
+    nfqwsc_running && return 0
     return 1
 }
