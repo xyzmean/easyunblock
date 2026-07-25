@@ -14,7 +14,9 @@ start_service() {
     [ -n "$bin" ] || return 0
 
     local hostlist="/var/run/easyunblock-sni-domains.txt"
-    [ -r "$hostlist" ] || touch "$hostlist"
+    if [ ! -s "$hostlist" ]; then
+        echo "dummy.easyunblock.local" > "$hostlist"
+    fi
 
     procd_open_instance
     procd_set_param command "$bin" --qnum=200 --mark-match=0x1 --mark-nomatch=0x2 --hostlist="$hostlist"
