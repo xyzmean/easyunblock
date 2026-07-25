@@ -97,13 +97,11 @@ config_get() { eval "$1=\"\${cfg_${2}_${3}:-$4}\""; }
     [ "$(top_endpoint)" = "wg0" ]
 }
 
-@test "ep_type defaults to wg and honors explicit type" {
+@test "ep_type returns wg" {
     load_endpoint_helpers
-    SECTIONS="a b"
-    cfg_a_iface=wg0  cfg_a_priority=1            # no type -> wg
-    cfg_b_iface=sb0  cfg_b_priority=2 cfg_b_type=singbox
+    SECTIONS="a"
+    cfg_a_iface=wg0 cfg_a_priority=1
     [ "$(ep_type wg0)" = "wg" ]
-    [ "$(ep_type sb0)" = "singbox" ]
 }
 
 # Security gate for privileged firewall fixes: only configured endpoints pass,

@@ -5,9 +5,9 @@
 . /usr/local/lib/easyunblock/common.sh 2>/dev/null || . /lib/functions.sh 2>/dev/null || true
 
 show_header() {
-    printf '\033[1;36m====================================================\033[0m\n'
-    printf '\033[1;32m       🚀 EASYUNBLOCK CLI — Управление обходом      \033[0m\n'
-    printf '\033[1;36m====================================================\033[0m\n'
+    printf '%s\n' '===================================================='
+    printf '%s\n' '       🚀 EASYUNBLOCK CLI — Управление обходом      '
+    printf '%s\n' '===================================================='
 }
 
 get_current_mode() {
@@ -16,29 +16,35 @@ get_current_mode() {
 
 get_sni_status() {
     _sni="$(uci -q get splify.global.sni_routing 2>/dev/null)"
-    [ "$_sni" = "1" ] && printf '\033[1;32mВКЛ (NFQUEUE/nfqws)\033[0m' || printf '\033[1;31mВЫКЛ\033[0m'
+    if [ "$_sni" = "1" ]; then
+        printf '%s' 'ВКЛ (NFQUEUE/nfqws)'
+    else
+        printf '%s' 'ВЫКЛ'
+    fi
 }
 
 get_service_status() {
     if /etc/init.d/easyunblock status >/dev/null 2>&1 || ip -4 rule show | grep -q "0x40000"; then
-        printf '\033[1;32mРАБОТАЕТ\033[0m'
+        printf '%s' 'РАБОТАЕТ'
     else
-        printf '\033[1;31mОСТАНОВЛЕН\033[0m'
+        printf '%s' 'ОСТАНОВЛЕН'
     fi
 }
 
 do_status() {
     show_header
     printf ' Статус службы:        %s\n' "$(get_service_status)"
-    printf ' Режим маршрутизации:  \033[1;33m%s\033[0m\n' "$(get_current_mode)"
+    printf ' Режим маршрутизации:  %s\n' "$(get_current_mode)"
     printf ' SNI-маршрутизация:    %s\n' "$(get_sni_status)"
     
     _killswitch="$(uci -q get splify.global.killswitch 2>/dev/null || echo 0)"
-    [ "$_killswitch" = "1" ] && _ks_str="ВКЛ (Блокировка при сбое)" || _ks_str="ВЫКЛ (Фолбэк на провайдера)"
+    if [ "$_killswitch" = "1" ]; then
+        _ks_str="ВКЛ (Блокировка при сбое)"
+    else
+        _ks_str="ВЫКЛ (Фолбэк на провайдера)"
+    fi
     printf ' Killswitch:           %s\n' "$_ks_str"
     echo "----------------------------------------------------"
-    
-    # Списки
     if [ -x /usr/local/sbin/easyunblock-status ]; then
         /usr/local/sbin/easyunblock-status | grep -E "^(ipsum|ru|noz|  [a-zA-Z0-9_]+  handshake)" || true
     fi
@@ -51,9 +57,9 @@ set_mode() {
         blocklist|full|split)
             uci -q set splify.global.mode="$_mode"
             uci -q commit splify
-            printf '--> Режим изменен на: \033[1;33m%s\033[0m. Применяю правила...\n' "$_mode"
+            echo "--> Режим изменен на: $_mode. Применяю правила..."
             /usr/local/sbin/easyunblock-apply >/dev/null 2>&1
-            printf '--> Готово!\n'
+            echo "--> Готово!"
             ;;
         *)
             echo "Ошибка: допустимые режимы: blocklist, full, split"
@@ -62,18 +68,17 @@ set_mode() {
 }
 
 set_sni() {
-    _val="$1"
-    case "$_val" in
+    case "$1" in
         on|1|enable)
             uci -q set splify.global.sni_routing='1'
             uci -q commit splify
-            printf '--> SNI-маршрутизация \033[1;32mВКЛЮЧЕНА\033[0m. Применяю правила...\n'
+            echo "--> SNI-маршрутизация ВКЛЮЧЕНА. Применяю правила..."
             /usr/local/sbin/easyunblock-apply >/dev/null 2>&1
             ;;
         off|0|disable)
             uci -q set splify.global.sni_routing='0'
             uci -q commit splify
-            printf '--> SNI-маршрутизация \033[1;31mВЫКЛЮЧЕНА\033[0m. Применяю правила...\n'
+            echo "--> SNI-маршрутизация ВЫКЛЮЧЕНА. Применяю правила..."
             /usr/local/sbin/easyunblock-apply >/dev/null 2>&1
             ;;
         *)
@@ -93,13 +98,13 @@ add_domain() {
         vpn)
             uci -q add_list splify.global.vpn_domain="$_dom"
             uci -q commit splify
-            printf '--> Домен \033[1;36m%s\033[0m добавлен в VPN список.\n' "$_dom"
+            echo "--> Домен $_dom добавлен в VPN список."
             /usr/local/sbin/easyunblock-apply >/dev/null 2>&1
             ;;
         direct)
             uci -q add_list splify.global.direct_domain="$_dom"
             uci -q commit splify
-            printf '--> Домен \033[1;36m%s\033[0m добавлен в список ИСКЛЮЧЕНИЙ (прямой канал).\n' "$_dom"
+            echo "--> Домен $_dom добавлен в список ИСКЛЮЧЕНИЙ (прямой канал)."
             /usr/local/sbin/easyunblock-apply >/dev/null 2>&1
             ;;
         *)
@@ -109,15 +114,15 @@ add_domain() {
 }
 
 update_lists() {
-    printf '--> Обновление списка заблокированных IP (ipsum)...\n'
+    echo "--> Обновление списка заблокированных IP (ipsum)..."
     [ -x /usr/local/sbin/easyunblock-update-ipsum ] && /usr/local/sbin/easyunblock-update-ipsum || echo "Пропущено"
-    printf '--> Обновление списка подсетей РФ/Китая (ru/cn)...\n'
+    echo "--> Обновление списка подсетей РФ/Китая (ru/cn)..."
     [ -x /usr/local/sbin/easyunblock-update-ru ] && /usr/local/sbin/easyunblock-update-ru || echo "Пропущено"
-    printf '--> Обновление доменных списков...\n'
+    echo "--> Обновление доменных списков..."
     [ -x /usr/local/sbin/easyunblock-update-domains ] && /usr/local/sbin/easyunblock-update-domains || echo "Пропущено"
-    printf '--> Применение новых списков...\n'
+    echo "--> Применение новых списков..."
     /usr/local/sbin/easyunblock-apply >/dev/null 2>&1
-    printf '\033[1;32m--> Все списки успешно обновлены и применены!\033[0m\n'
+    echo "--> Все списки успешно обновлены и применены!"
 }
 
 show_menu() {
@@ -134,30 +139,30 @@ show_menu() {
         echo " 9) Диагностика системы (doctor)"
         echo " 0) Выход"
         echo "----------------------------------------------------"
-        printf 'Выберите действие [0-9]: '
+        printf '%s' 'Выберите действие [0-9]: '
         read -r choice
         case "$choice" in
             1) continue ;;
-            2) 
+            2)
                 /etc/init.d/easyunblock enable >/dev/null 2>&1
                 /etc/init.d/easyunblock start
-                printf '\033[1;32m--> Служба запущена!\033[0m\n'
+                echo "--> Служба запущена!"
                 sleep 1 ;;
-            3) 
+            3)
                 /etc/init.d/easyunblock stop
                 [ -x /usr/local/sbin/easyunblock-disable ] && /usr/local/sbin/easyunblock-disable >/dev/null 2>&1
-                printf '\033[1;31m--> Служба остановлена, трафик идёт напрямую.\033[0m\n'
+                echo "--> Служба остановлена, трафик идёт напрямую."
                 sleep 1 ;;
-            4) 
+            4)
                 /etc/init.d/easyunblock restart
-                printf '\033[1;32m--> Перезапущено!\033[0m\n'
+                echo "--> Перезапущено!"
                 sleep 1 ;;
-            5) 
-                printf 'Введите режим [blocklist | full | split]: '
+            5)
+                printf '%s' 'Введите режим [blocklist | full | split]: '
                 read -r m
                 [ -n "$m" ] && set_mode "$m"
                 sleep 1 ;;
-            6) 
+            6)
                 _curr="$(uci -q get splify.global.sni_routing 2>/dev/null)"
                 if [ "$_curr" = "1" ]; then
                     set_sni off
@@ -165,22 +170,21 @@ show_menu() {
                     set_sni on
                 fi
                 sleep 1 ;;
-            7) 
-                printf 'Куда направить домен? [vpn | direct]: '
+            7)
+                printf '%s' 'Куда направить домен? [vpn | direct]: '
                 read -r dt
-                printf 'Введите домен (например, example.com): '
+                printf '%s' 'Введите домен (например, example.com): '
                 read -r dom
                 [ -n "$dt" ] && [ -n "$dom" ] && add_domain "$dt" "$dom"
                 sleep 1 ;;
-            8) update_lists; printf 'Нажмите Enter для продолжения...'; read -r _ ;;
-            9) [ -x /usr/local/sbin/easyunblock-doctor ] && /usr/local/sbin/easyunblock-doctor; printf 'Нажмите Enter для продолжения...'; read -r _ ;;
-            0|q|exit) printf 'Выход.\n'; break ;;
-            *) printf 'Неверный выбор, попробуйте снова.\n'; sleep 1 ;;
+            8) update_lists; echo "Нажмите Enter для продолжения..."; read -r _ ;;
+            9) [ -x /usr/local/sbin/easyunblock-doctor ] && /usr/local/sbin/easyunblock-doctor; echo "Нажмите Enter для продолжения..."; read -r _ ;;
+            0|q|exit) echo "Выход."; break ;;
+            *) echo "Неверный выбор, попробуйте снова."; sleep 1 ;;
         esac
     done
 }
 
-# ---- Диспетчер команд CLI ----
 case "$1" in
     status)         do_status ;;
     on|start)       /etc/init.d/easyunblock enable >/dev/null 2>&1; /etc/init.d/easyunblock start; /usr/local/sbin/easyunblock-apply ;;
@@ -194,14 +198,7 @@ case "$1" in
     '')             show_menu ;;
     *)
         echo "Использование: easyunblock-cli [команда]"
-        echo "Команды:"
-        echo "  status                      - показать текущий статус"
-        echo "  on | off | restart          - управление службой"
-        echo "  mode <blocklist|full|split> - переключение режима маршрутизации"
-        echo "  sni <on|off>                - управление SNI-маршрутизацией (nfqws)"
-        echo "  domain-add <vpn|direct> <d> - добавить домен в маршрутизацию"
-        echo "  update                      - скачать и обновить списки IP/доменов"
-        echo "  doctor                      - запуск диагностики системы"
+        echo "Команды: status | on | off | restart | mode <m> | sni <on/off> | domain-add <vpn/direct> <d> | update | doctor"
         echo "Без аргументов запускает интерактивное меню."
         exit 1
         ;;

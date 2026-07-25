@@ -26,20 +26,46 @@ clean_domains() {
     '
 }
 
-fetch_one() {  # url dest label
-    [ -n "$1" ] || { : > "$2"; return 0; }   # empty URL -> clear the dest list ($2)
-    curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 -o "$TMP/raw" "$1" \
-        || { warn "domains fetch failed: $1"; return 1; }
-    clean_domains < "$TMP/raw" > "$TMP/clean"
-    _n=$(wc -l < "$TMP/clean")
-    [ "$_n" -gt 0 ] || { warn "no valid domains from $1"; return 1; }
-    cat "$TMP/clean" > "$2"
-    log "$3 domains: $_n from $1"
+fetch_all() {  # sources dest_file label
+    _sources="$1"; _dest="$2"; _label="$3"
+    _tmp_raw="$TMP/raw_${_label}"
+    : > "$_tmp_raw"
+    
+    # 1. Загружаем из URL или локальных путей, указанных в uci
+    for _src in $_sources; do
+        case "$_src" in
+            http://*|https://*|ftp://*)
+                curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 "$_src" >> "$_tmp_raw" 2>/dev/null || warn "domains fetch failed: $_src"
+                ;;
+            /*|./*)
+                [ -r "$_src" ] && cat "$_src" >> "$_tmp_raw" 2>/dev/null || warn "local file read failed: $_src"
+                ;;
+        esac
+    done
+
+    # 2. Склеиваем со всеми .lst файлами из директории /etc/splify/${_label}-domains.d/
+    if [ -d "/etc/splify/${_label}-domains.d" ]; then
+        for _f in /etc/splify/${_label}-domains.d/*.lst; do
+            [ -r "$_f" ] && cat "$_f" >> "$_tmp_raw" 2>/dev/null || true
+        done
+    fi
+
+    # 3. Очищаем, удаляем *. и дубликаты
+    clean_domains < "$_tmp_raw" > "$TMP/clean_${_label}"
+    _n=$(wc -l < "$TMP/clean_${_label}" 2>/dev/null || echo 0)
+    if [ "$_n" -gt 0 ]; then
+        cat "$TMP/clean_${_label}" > "$_dest"
+        log "$_label domains: $_n merged entries"
+    else
+        : > "$_dest"
+    fi
 }
 
+mkdir -p /etc/splify/vpn-domains.d /etc/splify/ignore-domains.d 2>/dev/null || true
+
 _changed=0
-fetch_one "$VPN_DOMAINS_URL"    "$DOMAINS_VPN_FILE"    vpn    && _changed=1
-fetch_one "$IGNORE_DOMAINS_URL" "$DOMAINS_IGNORE_FILE" ignore && _changed=1
+fetch_all "$VPN_DOMAINS_URL"    "$DOMAINS_VPN_FILE"    vpn    && _changed=1
+fetch_all "$IGNORE_DOMAINS_URL" "$DOMAINS_IGNORE_FILE" ignore && _changed=1
 
 [ "$_changed" = 1 ] && [ -x /usr/local/sbin/easyunblock-apply ] \
     && /usr/local/sbin/easyunblock-apply >/dev/null 2>&1 || true

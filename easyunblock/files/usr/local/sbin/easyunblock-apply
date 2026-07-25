@@ -205,6 +205,12 @@ DEV_LINES="$(config_foreach emit_devices device)"
         echo ""
         echo "    # 4. Первый пакет новой/неразмеченной TCP-сессии отправляем в NFQUEUE для SNI-анализа"
         echo "    ip saddr { $LAN_CIDR } meta mark 0x0 tcp dport { 80, 443 } ct mark 0x0 ct state new,established counter queue num $SNI_NFQUEUE_NUM bypass"
+        echo ""
+        echo "    # 5. После возврата из NFQUEUE: если nfqws поставил метку 0x1 (домен в блок-листе) -> вешаем connmark 0x1 и направляем в туннель"
+        echo "    ip saddr { $LAN_CIDR } meta mark & $SNI_MARK_VPN == $SNI_MARK_VPN ct mark set $SNI_MARK_VPN meta mark set meta mark or $WG_MARK counter return"
+        echo ""
+        echo "    # 6. Если метки 0x1 нет -> сайт обычный, вешаем на сессию connmark 0x2, чтобы дальнейший трафик летел напрямую"
+        echo "    ip saddr { $LAN_CIDR } ct mark 0x0 ct mark set $SNI_MARK_DIRECT counter return"
         echo "}"
     fi
 } > "${POLICY_NFT_FILE}.tmp"
@@ -235,6 +241,24 @@ fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1 \
 # are re-established immediately.
 /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
 [ -x /usr/local/sbin/easyunblock-failover ] && /usr/local/sbin/easyunblock-failover >/dev/null 2>&1 || true
+
+# ---- синхронизация доменов с zapret / nfqws и управление службой --------
+if [ "$SNI_ROUTING" = "1" ] && zapret_available; then
+    ZAPRET_HOSTS=""
+    [ -f /opt/zapret2/ipset/zapret-hosts-user.txt ] && ZAPRET_HOSTS="/opt/zapret2/ipset/zapret-hosts-user.txt"
+    [ -f /opt/zapret/ipset/zapret-hosts-user.txt ]  && ZAPRET_HOSTS="/opt/zapret/ipset/zapret-hosts-user.txt"
+    if [ -n "$ZAPRET_HOSTS" ]; then
+        {
+            [ -r "$DOMAINS_VPN_FILE" ] && cat "$DOMAINS_VPN_FILE"
+            for _d in $VPN_DOMAINS; do [ -n "$_d" ] && echo "$_d"; done
+        } | sort -u > "$ZAPRET_HOSTS.tmp" 2>/dev/null && mv "$ZAPRET_HOSTS.tmp" "$ZAPRET_HOSTS" 2>/dev/null || true
+    fi
+    # Убеждаемся, что служба zapret запущена и подхватила правила
+    if [ -n "$ZAPRET_INIT" ] && [ -x "$ZAPRET_INIT" ]; then
+        "$ZAPRET_INIT" enabled >/dev/null 2>&1 || "$ZAPRET_INIT" enable >/dev/null 2>&1 || true
+        zapret_running || "$ZAPRET_INIT" start >/dev/null 2>&1 || "$ZAPRET_INIT" restart >/dev/null 2>&1 || true
+    fi
+fi
 
 _STATUS="applied"; [ "$_APPLY_FAIL" = 1 ] && _STATUS="applied WITH WARNINGS (see above)"
 log "$_STATUS: mode=$MODE ipsum=$IPSUM_ENABLED zapret=$ZAPRET_ENABLED sni=$SNI_ROUTING kill=$KILLSWITCH vpn_cidrs=$(echo "$VPN_CIDRS" | wc -w) direct_cidrs=$(echo "$DIRECT_CIDRS" | wc -w)"
