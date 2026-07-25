@@ -4,14 +4,8 @@ STOP=11
 USE_PROCD=1
 
 start_service() {
-    config_load splify
-    local enabled
-    config_get_bool enabled global enabled 0
-    [ "$enabled" = 1 ] || return 0
-
-    local sni_routing
-    config_get_bool sni_routing global sni_routing 0
-    [ "$sni_routing" = 1 ] || return 0
+    . /usr/local/lib/easyunblock/common.sh
+    [ "$SNI_ROUTING" = "1" ] || return 0
 
     local bin=""
     for b in /usr/local/sbin/nfqwsc /usr/bin/nfqwsc /opt/zapret/nfq/nfqwsc; do
