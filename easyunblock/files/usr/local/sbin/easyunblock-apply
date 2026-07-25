@@ -179,13 +179,13 @@ DEV_LINES="$(config_foreach emit_devices device)"
         echo "chain splify_ipsum_mark_prerouting {"
         echo "    type filter hook prerouting priority mangle + 1; policy accept;"
         [ "$HAS_VPN" = 1 ] && \
-        echo "    ip saddr { $LAN_CIDR } meta mark 0x0 ip daddr @$VPN_SET meta mark set meta mark or $WG_MARK counter"
+        echo "    ip saddr { $LAN_CIDR } meta mark 0x0 ip daddr @$VPN_SET ct mark set $SNI_MARK_VPN meta mark set meta mark or $WG_MARK counter"
         case "$MODE" in
             blocklist)
                 [ "$IPSUM_ENABLED" = "1" ] && \
-                echo "    ip saddr { $LAN_CIDR } meta mark 0x0 ip daddr @$IPSUM_SET meta mark set meta mark or $WG_MARK counter" ;;
+                echo "    ip saddr { $LAN_CIDR } meta mark 0x0 ip daddr @$IPSUM_SET ct mark set $SNI_MARK_VPN meta mark set meta mark or $WG_MARK counter" ;;
             full)
-                echo "    ip saddr { $LAN_CIDR } meta mark 0x0 meta mark set meta mark or $WG_MARK counter" ;;
+                echo "    ip saddr { $LAN_CIDR } meta mark 0x0 ct mark set $SNI_MARK_VPN meta mark set meta mark or $WG_MARK counter" ;;
             split) : ;;
         esac
         echo "}"
