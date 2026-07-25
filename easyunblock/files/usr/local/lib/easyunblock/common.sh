@@ -52,8 +52,9 @@ config_get        DIRECT_DOMAINS  global direct_domain   ''
 WG_TABLE="200"
 WG_MARK="0x40000";        WG_MARK_MASK="0x40000";   WG_RULE_PRIO="999"
 ANTI_LOOP_MARK="0x10000"; ANTI_LOOP_MASK="0x10000"; ANTI_LOOP_PRIO="1000"
-# SNI-based routing via NFQUEUE / nfqws
+# SNI-based routing and WAN DPI bypass via NFQUEUE / nfqws
 SNI_MARK_VPN="0x1";       SNI_MARK_DIRECT="0x2";    SNI_NFQUEUE_NUM="200"
+ZAPRET_NFQUEUE_NUM="200"
 # Isolated table+rule for health probes: the endpoints run route_allowed_ips=0
 # (so an ifup can't hijack main routes), which also means they have no main-table
 # route to public targets — the probe installs a scoped route via the candidate's

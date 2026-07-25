@@ -45,7 +45,7 @@ fetch_all() {  # sources dest_file label
 
     # 2. Склеиваем со всеми .lst файлами из директории /etc/splify/${_label}-domains.d/
     if [ -d "/etc/splify/${_label}-domains.d" ]; then
-        for _f in /etc/splify/${_label}-domains.d/*.lst; do
+        for _f in "/etc/splify/${_label}-domains.d/"*.lst; do
             [ -r "$_f" ] && cat "$_f" >> "$_tmp_raw" 2>/dev/null || true
         done
     fi
