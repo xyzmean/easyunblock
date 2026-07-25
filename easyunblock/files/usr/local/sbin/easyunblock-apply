@@ -257,10 +257,6 @@ if [ "$SNI_ROUTING" = "1" ] && zapret_available; then
     if [ -n "$ZAPRET_INIT" ] && [ -x "$ZAPRET_INIT" ]; then
         "$ZAPRET_INIT" enabled >/dev/null 2>&1 || "$ZAPRET_INIT" enable >/dev/null 2>&1 || true
         zapret_running || "$ZAPRET_INIT" start >/dev/null 2>&1 || "$ZAPRET_INIT" restart >/dev/null 2>&1 || true
-        # В режиме SNI-роутинга удаляем собственные таблицы правил zapret, чтобы
-        # трафик в очередь nfqws направлялся ТОЛЬКО нашей цепочкой splify_sni_mark_prerouting (1-й пакет сессии)
-        nft delete table inet zapret 2>/dev/null || true
-        nft delete table inet zapret2 2>/dev/null || true
     fi
 fi
 
