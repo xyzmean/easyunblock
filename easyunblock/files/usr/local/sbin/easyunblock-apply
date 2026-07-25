@@ -213,24 +213,6 @@ DEV_LINES="$(config_foreach emit_devices device)"
         echo "    ip saddr { $LAN_CIDR } ct mark 0x0 ct mark set $SNI_MARK_DIRECT counter return"
         echo "}"
     fi
-
-    if [ "$ZAPRET_ENABLED" = "1" ] && zapret_available; then
-        echo ""
-        echo "chain splify_zapret_postrouting {"
-        echo "    type filter hook postrouting priority mangle + 10; policy accept;"
-        echo "    # Исключаем локальные и частные сети из DPI-обхода"
-        echo "    ip daddr { 10.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 100.64.0.0/10 } return"
-        if [ "$DIRECT_ENABLED" = 1 ] && [ -n "$DIRECT_CIDRS" ]; then
-            echo "    ip daddr @$DIRECT_SET return"
-        fi
-        if [ "$RU_ENABLED" = 1 ] && [ -n "$RU_CIDRS" ]; then
-            echo "    ip daddr @$RU_SET return"
-        fi
-        echo "    # Заворачиваем WAN веб-трафик в NFQUEUE для DPI-обхода zapret (nfqws)"
-        echo "    tcp dport { 80, 443 } counter queue num ${ZAPRET_NFQUEUE_NUM:-200} bypass"
-        echo "    udp dport { 443 } counter queue num ${ZAPRET_NFQUEUE_NUM:-200} bypass"
-        echo "}"
-    fi
 } > "${POLICY_NFT_FILE}.tmp"
 _APPLY_FAIL=0
 mv "${POLICY_NFT_FILE}.tmp" "$POLICY_NFT_FILE" || { warn "failed to install $POLICY_NFT_FILE — policy ruleset NOT updated"; _APPLY_FAIL=1; }
@@ -275,6 +257,10 @@ if [ "$SNI_ROUTING" = "1" ] && zapret_available; then
     if [ -n "$ZAPRET_INIT" ] && [ -x "$ZAPRET_INIT" ]; then
         "$ZAPRET_INIT" enabled >/dev/null 2>&1 || "$ZAPRET_INIT" enable >/dev/null 2>&1 || true
         zapret_running || "$ZAPRET_INIT" start >/dev/null 2>&1 || "$ZAPRET_INIT" restart >/dev/null 2>&1 || true
+        # В режиме SNI-роутинга удаляем собственные таблицы правил zapret, чтобы
+        # трафик в очередь nfqws направлялся ТОЛЬКО нашей цепочкой splify_sni_mark_prerouting (1-й пакет сессии)
+        nft delete table inet zapret 2>/dev/null || true
+        nft delete table inet zapret2 2>/dev/null || true
     fi
 fi
 
