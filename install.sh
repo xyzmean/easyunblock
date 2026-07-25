@@ -10,7 +10,38 @@ TMP="$(mktemp -d /tmp/easyunblock.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33mВнимание:\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
+
+install_nfqwsc() {
+  if command -v nfqwsc >/dev/null 2>&1 || [ -x /usr/local/sbin/nfqwsc ]; then
+    say "nfqwsc уже установлен."
+    return 0
+  fi
+  say "Определяю архитектуру для установки nfqwsc…"
+  local arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="x86_64" ;;
+    aarch64|arm64) arch="aarch64" ;;
+    arm*) arch="arm" ;;
+    mips64*) arch="mips64" ;;
+    mipsel*|mipsle*) arch="mipsel" ;;
+    mips*) arch="mips" ;;
+    i?86|x86) arch="x86" ;;
+    *) warn "Неизвестная архитектура $arch, пробую aarch64…"; arch="aarch64" ;;
+  esac
+
+  say "Скачиваю nfqwsc ($arch) из GitHub releases…"
+  mkdir -p /usr/local/sbin
+  local nfq_url="https://github.com/xyzmean/nfqwsc/releases/latest/download/nfqwsc-${arch}"
+  if wget -qO "$TMP/nfqwsc" "$nfq_url"; then
+    mv "$TMP/nfqwsc" /usr/local/sbin/nfqwsc
+    chmod +x /usr/local/sbin/nfqwsc
+    say "nfqwsc ($arch) успешно установлен в /usr/local/sbin/nfqwsc."
+  else
+    err "Не удалось скачать nfqwsc по ссылке $nfq_url"
+  fi
+}
 
 # 1) проверки окружения
 [ "$(id -u)" = "0" ] || err "запустите от root."
@@ -42,6 +73,9 @@ ls "$TMP/easyunblock-"*.apk >/dev/null 2>&1 || err "в релизе не хва�
 # 4) установить (зависимости подтянутся из фидов)
 say "Устанавливаю…"
 apk add --allow-untrusted "$TMP"/*.apk || err "apk add не выполнился."
+
+# 4b) установить nfqwsc (обязательный компонент SNI-маршрутизации)
+install_nfqwsc
 
 # 5) перезапустить работающие демоны
 if [ -x "/etc/init.d/easyunblock" ] && "/etc/init.d/easyunblock" enabled 2>/dev/null; then

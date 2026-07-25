@@ -146,6 +146,37 @@ install_easyunblock() {
   fi
 }
 
+# ──────────────────────────── 2b. install nfqwsc ────────────────────────────
+install_nfqwsc() {
+  if command -v nfqwsc >/dev/null 2>&1 || [ -x /usr/local/sbin/nfqwsc ]; then
+    say "nfqwsc уже установлен."
+    return 0
+  fi
+  say "Определяю архитектуру для установки nfqwsc…"
+  local arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="x86_64" ;;
+    aarch64|arm64) arch="aarch64" ;;
+    arm*) arch="arm" ;;
+    mips64*) arch="mips64" ;;
+    mipsel*|mipsle*) arch="mipsel" ;;
+    mips*) arch="mips" ;;
+    i?86|x86) arch="x86" ;;
+    *) warn "Неизвестная архитектура $arch, пробую aarch64…"; arch="aarch64" ;;
+  esac
+
+  say "Скачиваю nfqwsc ($arch) из GitHub releases…"
+  mkdir -p /usr/local/sbin
+  local nfq_url="https://github.com/xyzmean/nfqwsc/releases/latest/download/nfqwsc-${arch}"
+  if wget -qO "$TMP/nfqwsc" "$nfq_url"; then
+    mv "$TMP/nfqwsc" /usr/local/sbin/nfqwsc
+    chmod +x /usr/local/sbin/nfqwsc
+    say "nfqwsc ($arch) успешно установлен в /usr/local/sbin/nfqwsc."
+  else
+    err "Не удалось скачать nfqwsc по ссылке $nfq_url"
+  fi
+}
+
 # ──────────────────────────── 3. install AmneziaWG ──────────────────────────
 install_awg() {
   _awg_installed=0
@@ -413,9 +444,9 @@ config endpoint
 	option type 'wg'
 EOF
   fi
-  # Если в системе установлен zapret (или nfqws), включаем SNI-маршрутизацию
-  if [ -x /etc/init.d/zapret ] || [ -x /etc/init.d/zapret2 ] || command -v nfqws >/dev/null 2>&1 || [ -x /opt/zapret/nfq/nfqws ] || [ -x /opt/zapret2/nfq2/nfqws2 ]; then
-    say "Обнаружен zapret/nfqws в системе: включаем SNI-маршрутизацию в /etc/config/splify…"
+  # Включаем SNI-маршрутизацию по умолчанию, так как nfqwsc теперь обязателен и установлен
+  if [ -x /usr/local/sbin/nfqwsc ] || command -v nfqwsc >/dev/null 2>&1 || [ -x /etc/init.d/zapret ] || [ -x /etc/init.d/zapret2 ] || command -v nfqws >/dev/null 2>&1 || [ -x /opt/zapret/nfq/nfqws ] || [ -x /opt/zapret2/nfq2/nfqws2 ]; then
+    say "Обнаружен nfqwsc/zapret в системе: включаем SNI-маршрутизацию в /etc/config/splify…"
     uci -q set splify.global.sni_routing='1'
     uci -q commit splify
   fi
@@ -451,6 +482,8 @@ setup_firewall() {
 
 # ──────────────────────────── main ──────────────────────────────────────────
 install_easyunblock
+sleep 3
+install_nfqwsc
 sleep 3
 install_awg
 sleep 3
